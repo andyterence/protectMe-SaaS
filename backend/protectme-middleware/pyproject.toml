@@ -1,0 +1,25 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "protectme-middleware"
+version = "0.1.0"
+description = "Middleware Django de détection d'intrusion en temps réel via l'API protectMe"
+readme = "README.md"
+requires-python = ">=3.9"
+license = { text = "Proprietary" }
+dependencies = [
+    "django>=4.0",
+    "requests>=2.28,<3.0",
+]
+
+# Volontairement minimal : seulement 2 dépendances, aucune librairie ML
+# (pandas/scikit-learn) n'est nécessaire ici puisque l'inférence a lieu
+# côté plateforme centrale, jamais sur le serveur du client.
+
+[project.optional-dependencies]
+test = ["pytest>=7.0", "pytest-django>=4.5", "responses>=0.23"]
+
+[tool.setuptools.packages.find]
+include = ["protectme*"]
