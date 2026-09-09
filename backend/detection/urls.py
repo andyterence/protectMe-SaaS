@@ -5,6 +5,8 @@ from .views import (
     AttackLogReviewView,
     ConnectionLogListView,
     DetectView,
+    ModelRetrainView,
+    ModelStatsView,
     SimulateView,
 )
 
@@ -14,4 +16,6 @@ urlpatterns = [
     path("attack-logs/<int:pk>/review/", AttackLogReviewView.as_view()),
     path("connection-logs/", ConnectionLogListView.as_view()),
     path("simulate/", SimulateView.as_view()),
+    path("model/stats/", ModelStatsView.as_view()),
+    path("model/retrain/", ModelRetrainView.as_view()),
 ]

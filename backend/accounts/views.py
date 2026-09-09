@@ -1,13 +1,23 @@
 from django.conf import settings
 from django.contrib.auth import authenticate
+from .serializers import (
+    RegisterSerializer,
+    ChangePasswordSerializer,
+    DeleteAccountSerializer,
+    UserAdminSerializer,
+    LoginSerializer,
+    UserSerializer,
+)
+from django.db.models import Count
+from .models import User
 from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 from rest_framework_simplejwt.authentication import JWTAuthentication
 from rest_framework_simplejwt.exceptions import TokenError
 from rest_framework_simplejwt.tokens import RefreshToken
+from rest_framework.exceptions import NotFound, PermissionDenied
 
-from .serializers import LoginSerializer, UserSerializer
 
 REFRESH_COOKIE_NAME = "protectme_refresh"
 REFRESH_COOKIE_MAX_AGE = 60 * 60 * 24 * 7  # 7 jours - doit matcher SIMPLE_JWT.REFRESH_TOKEN_LIFETIME
@@ -48,7 +58,19 @@ class LoginView(APIView):
         response = Response({"access": str(refresh.access_token)})
         _set_refresh_cookie(response, str(refresh))
         return response
+    
+class RegisterView(APIView):
+    permission_classes = [AllowAny]
 
+    def post(self, request):
+        serializer = RegisterSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        user = serializer.save()
+
+        refresh = RefreshToken.for_user(user)
+        response = Response({"access": str(refresh.access_token)}, status=201)
+        _set_refresh_cookie(response, str(refresh))
+        return response
 
 class RefreshView(APIView):
     """Pas de rotation du refresh token ici (simplicite assumee, sans
@@ -87,3 +109,79 @@ class MeView(APIView):
 
     def get(self, request):
         return Response(UserSerializer(request.user).data)
+    
+class ChangePasswordView(APIView):
+    """Necessite le mot de passe actuel pour toute modification - meme un
+    utilisateur deja authentifie ne doit pas pouvoir changer son mot de
+    passe sur une session volee sans reconnaitre l'ancien secret.
+    """
+    authentication_classes = [JWTAuthentication]
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        serializer = ChangePasswordSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        user = request.user
+        if not user.check_password(serializer.validated_data["current_password"]):
+            return Response({"detail": "Mot de passe actuel incorrect."}, status=400)
+
+        user.set_password(serializer.validated_data["new_password"])
+        user.save(update_fields=["password"])
+        return Response({"detail": "Mot de passe mis a jour."})
+
+class DeleteAccountView(APIView):
+    """Suppression definitive du compte, protegee par re-saisie du mot de
+    passe - meme regle de securite que ChangePasswordView : une session
+    active ne suffit pas a elle seule pour une action irreversible.
+    """
+    authentication_classes = [JWTAuthentication]
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        serializer = DeleteAccountSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        user = request.user
+        if not user.check_password(serializer.validated_data["password"]):
+            return Response({"detail": "Mot de passe incorrect."}, status=400)
+
+        response = Response({"detail": "Compte supprime."})
+        response.delete_cookie(REFRESH_COOKIE_NAME, path="/api/auth/")
+        user.delete()
+        return response
+    
+class UserListView(APIView):
+    authentication_classes = [JWTAuthentication]
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        if request.user.role != "admin":
+            raise PermissionDenied("Réservé à l'Admin.")
+        users = User.objects.annotate(sites_count=Count("sites", distinct=True)).order_by("-date_joined")
+        return Response(UserAdminSerializer(users, many=True).data)
+
+
+class UserToggleActiveView(APIView):
+    """Desactive/reactive un compte SANS le supprimer - contrairement a
+    DeleteAccountView qui est definitif, ici c'est reversible : utile pour
+    suspendre un compte suspect sans perdre ses donnees.
+    """
+    authentication_classes = [JWTAuthentication]
+    permission_classes = [IsAuthenticated]
+
+    def patch(self, request, pk):
+        if request.user.role != "admin":
+            raise PermissionDenied("Réservé à l'Admin.")
+        try:
+            target = User.objects.get(pk=pk)
+        except User.DoesNotExist:
+            raise NotFound("Utilisateur introuvable.")
+        if target.id == request.user.id:
+            return Response({"detail": "Vous ne pouvez pas désactiver votre propre compte."}, status=400)
+
+        target.is_active = not target.is_active
+        target.save(update_fields=["is_active"])
+        return Response(UserAdminSerializer.objects if False else UserAdminSerializer(
+            User.objects.annotate(sites_count=Count("sites", distinct=True)).get(pk=target.pk)
+        ).data)

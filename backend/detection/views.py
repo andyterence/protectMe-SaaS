@@ -6,6 +6,8 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 from rest_framework_simplejwt.authentication import JWTAuthentication
+from rest_framework.exceptions import PermissionDenied
+from .ml_retrain import InsufficientDataError, get_dataset_counts, retrain_model
 
 from sites.authentication import ApiKeyAuthentication
 from sites.models import Site
@@ -159,3 +161,29 @@ class SimulateView(APIView):
             "probability": round(proba, 4),
             "simulated": True,
         })
+
+def _require_admin(user):
+    if user.role != "admin":
+        raise PermissionDenied("Réservé à l'Admin (Développeur du Modèle).")
+
+
+class ModelStatsView(APIView):
+    authentication_classes = [JWTAuthentication]
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        _require_admin(request.user)
+        return Response(get_dataset_counts())
+
+
+class ModelRetrainView(APIView):
+    authentication_classes = [JWTAuthentication]
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        _require_admin(request.user)
+        try:
+            result = retrain_model()
+        except InsufficientDataError as exc:
+            return Response({"detail": str(exc)}, status=400)
+        return Response(result)

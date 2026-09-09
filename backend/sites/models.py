@@ -57,7 +57,8 @@ class Site(models.Model):
     def regenerate_key(self) -> str:
         """Invalide l'ancienne clé, en génère une nouvelle. La clé brute
         n'est retournée qu'ici, jamais stockée ni recupérable ensuite."""
-        raw_key = secrets.token_urlsafe(32)
-        self.api_key_hash = hashlib.sha256(raw_key.encode()).hexdigest()
-        self.save(update_fields=["api_key_hash"])
+        raw_key = f"sk_live_{secrets.token_urlsafe(32)}"
+        self.api_key_hash = _hash_key(raw_key)
+        self.api_key_prefix = raw_key[:12]
+        self.save(update_fields=["api_key_hash", "api_key_prefix"])
         return raw_key
